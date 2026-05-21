@@ -33,6 +33,76 @@ export function hashColor(str: string): string {
 }
 
 // ============================================================
+// Custom Selection Controls Renderers
+// ============================================================
+
+function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+function renderRoundedRectControl(
+  ctx: CanvasRenderingContext2D,
+  left: number,
+  top: number,
+  styleOverride: any,
+  fabricObject: fabric.FabricObject
+) {
+  const size = fabricObject.cornerSize ?? 10;
+  const strokeColor = '#818cf8'; // Premium soft lavender/blue matching reference
+  const fillColor = '#ffffff';
+  const radius = 2.5;
+
+  ctx.save();
+  ctx.translate(left, top);
+  ctx.rotate((fabricObject.angle ?? 0) * Math.PI / 180);
+
+  drawRoundedRect(ctx, -size / 2, -size / 2, size, size, radius);
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function renderCircleControl(
+  ctx: CanvasRenderingContext2D,
+  left: number,
+  top: number,
+  styleOverride: any,
+  fabricObject: fabric.FabricObject
+) {
+  const size = fabricObject.cornerSize ?? 10;
+  const strokeColor = '#818cf8';
+  const fillColor = '#ffffff';
+
+  ctx.save();
+  ctx.translate(left, top);
+  ctx.rotate((fabricObject.angle ?? 0) * Math.PI / 180);
+
+  ctx.beginPath();
+  ctx.arc(0, 0, size / 2, 0, 2 * Math.PI);
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// ============================================================
 // Canvas Manager
 // ============================================================
 
@@ -53,19 +123,38 @@ export class CanvasManager {
   // ── Selection styling constants ──────────────────────────
   private static readonly SELECTION_STYLE = {
     transparentCorners: false,
-    cornerColor: '#4f46e5',          // indigo-600
-    cornerStrokeColor: '#ffffff',
-    cornerSize: 8,
-    cornerStyle: 'circle' as const,
-    borderColor: '#6366f1',          // indigo-500
-    borderDashArray: [4, 3],
+    cornerColor: '#ffffff',
+    cornerStrokeColor: '#818cf8',    // Soft violet-blue
+    cornerSize: 10,
+    borderColor: '#818cf8',          // Soft violet-blue
+    borderDashArray: null,           // Solid border line
     borderScaleFactor: 1.5,
-    padding: 4,
+    padding: 6,
   };
 
   /** Stamp modern selection styling onto a single Fabric object. */
   private _applySelectionStyle(obj: fabric.FabricObject) {
     obj.set(CanvasManager.SELECTION_STYLE as any);
+
+    // Apply custom control handles to match reference design exactly
+    if (obj.controls) {
+      Object.entries(obj.controls).forEach(([key, control]) => {
+        if (key === 'ml' || key === 'mr' || key === 'mt' || key === 'mb') {
+          // Hide middle edge controls to match the clean corner-only reference design
+          control.visible = false;
+        } else if (key === 'mtr') {
+          // Rotation handle: floating hollow circle, no vertical connection line
+          control.render = renderCircleControl;
+          (control as any).withConnection = false;
+          control.offsetY = -24;
+          control.visible = true;
+        } else {
+          // Corner handles: hollow rounded rectangles
+          control.render = renderRoundedRectControl;
+          control.visible = true;
+        }
+      });
+    }
   }
 
   /**

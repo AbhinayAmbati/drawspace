@@ -127,10 +127,10 @@ export function TopBar() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="gap-2 font-semibold text-sm">
-                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
-                  <span className="text-white text-xs font-bold">D</span>
-                </div>
-                DrawSpace
+                <img src="/logo.png" alt="DrawSpace" className="w-6 h-6 rounded-lg object-cover shadow-md shadow-indigo-500/20" />
+                <span>
+                  Draw<span className="bg-gradient-to-r from-indigo-500 to-violet-600 bg-clip-text text-transparent font-extrabold">Space</span>
+                </span>
                 <Menu size={14} className="text-muted-foreground" />
               </Button>
             </DropdownMenuTrigger>

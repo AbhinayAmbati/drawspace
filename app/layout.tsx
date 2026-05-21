@@ -31,10 +31,29 @@ export const metadata: Metadata = {
     "brainstorm",
   ],
   authors: [{ name: "DrawSpace" }],
+  icons: {
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
+    apple: "/logo.png",
+  },
   openGraph: {
     title: "DrawSpace — Collaborative Whiteboard",
     description: "Draw, brainstorm, and collaborate in real-time.",
     type: "website",
+    images: [
+      {
+        url: "/seo-image.png",
+        width: 1200,
+        height: 630,
+        alt: "DrawSpace — Collaborative Whiteboard",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "DrawSpace — Collaborative Whiteboard",
+    description: "Draw, brainstorm, and collaborate in real-time with infinite canvas.",
+    images: ["/seo-image.png"],
   },
 };
 
