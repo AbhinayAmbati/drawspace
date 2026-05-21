@@ -49,6 +49,25 @@ export class CanvasManager {
   onSelectionChanged?: (ids: string[]) => void;
   onViewportChanged?: (zoom: number, panX: number, panY: number) => void;
 
+
+  // ── Selection styling constants ──────────────────────────
+  private static readonly SELECTION_STYLE = {
+    transparentCorners: false,
+    cornerColor: '#4f46e5',          // indigo-600
+    cornerStrokeColor: '#ffffff',
+    cornerSize: 8,
+    cornerStyle: 'circle' as const,
+    borderColor: '#6366f1',          // indigo-500
+    borderDashArray: [4, 3],
+    borderScaleFactor: 1.5,
+    padding: 4,
+  };
+
+  /** Stamp modern selection styling onto a single Fabric object. */
+  private _applySelectionStyle(obj: fabric.FabricObject) {
+    obj.set(CanvasManager.SELECTION_STYLE as any);
+  }
+
   /**
    * Initialize the Fabric.js canvas on a given HTML canvas element.
    */
@@ -63,6 +82,11 @@ export class CanvasManager {
       fireRightClick: true,
       enableRetinaScaling: true,
     });
+
+    // Canvas-level multi-selection rectangle
+    this.canvas.selectionColor = 'rgba(99, 102, 241, 0.08)';
+    this.canvas.selectionBorderColor = '#6366f1';
+    this.canvas.selectionLineWidth = 1.5;
 
     this._setupEventListeners();
     return this.canvas;
@@ -181,6 +205,7 @@ export class CanvasManager {
       rx: 8, ry: 8,
     });
     (rect as any).__objectId = id;
+    this._applySelectionStyle(rect);
     this.canvas.add(rect);
     this.canvas.requestRenderAll();
     this._emitObjectAdded(rect, id);
@@ -202,6 +227,7 @@ export class CanvasManager {
       opacity: fill.opacity,
     });
     (circle as any).__objectId = id;
+    this._applySelectionStyle(circle);
     this.canvas.add(circle);
     this.canvas.requestRenderAll();
     this._emitObjectAdded(circle, id);
@@ -223,6 +249,7 @@ export class CanvasManager {
       opacity: fill.opacity,
     });
     (ellipse as any).__objectId = id;
+    this._applySelectionStyle(ellipse);
     this.canvas.add(ellipse);
     this.canvas.requestRenderAll();
     this._emitObjectAdded(ellipse, id);
@@ -251,6 +278,7 @@ export class CanvasManager {
       opacity: fill.opacity,
     });
     (diamond as any).__objectId = id;
+    this._applySelectionStyle(diamond);
     this.canvas.add(diamond);
     this.canvas.requestRenderAll();
     this._emitObjectAdded(diamond, id);
@@ -269,6 +297,7 @@ export class CanvasManager {
       strokeDashArray: stroke.dashArray,
     });
     (line as any).__objectId = id;
+    this._applySelectionStyle(line);
     this.canvas.add(line);
     this.canvas.requestRenderAll();
     this._emitObjectAdded(line, id);
@@ -314,6 +343,7 @@ export class CanvasManager {
       top: Math.min(y1, y2),
     });
     (group as any).__objectId = id;
+    this._applySelectionStyle(group);
     this.canvas.add(group);
     this.canvas.requestRenderAll();
     this._emitObjectAdded(group, id);
@@ -334,6 +364,7 @@ export class CanvasManager {
       editable: true,
     });
     (itext as any).__objectId = id;
+    this._applySelectionStyle(itext);
     this.canvas.add(itext);
     this.canvas.setActiveObject(itext);
     itext.enterEditing();
@@ -380,6 +411,7 @@ export class CanvasManager {
       subTargetCheck: true,
     });
     (group as any).__objectId = id;
+    this._applySelectionStyle(group);
     this.canvas.add(group);
     this.canvas.requestRenderAll();
     this._emitObjectAdded(group, id);
@@ -529,6 +561,10 @@ export class CanvasManager {
     if (!this.canvas) return Promise.resolve();
     return new Promise((resolve) => {
       this.canvas!.loadFromJSON(JSON.parse(json)).then(() => {
+        // Apply selection styling to all loaded objects
+        this.canvas!.getObjects().forEach((obj) => {
+          this._applySelectionStyle(obj);
+        });
         this.canvas!.requestRenderAll();
         resolve();
       });
@@ -552,6 +588,7 @@ export class CanvasManager {
           img.scale(scaleFactor);
         }
         (img as any).__objectId = id;
+        this._applySelectionStyle(img);
         this.canvas!.add(img);
         this.canvas!.requestRenderAll();
         this._emitObjectAdded(img, id);
@@ -637,6 +674,7 @@ export class CanvasManager {
       if (path) {
         const id = uuidv4();
         (path as any).__objectId = id;
+        this._applySelectionStyle(path);
         this._emitObjectAdded(path, id);
       }
     });

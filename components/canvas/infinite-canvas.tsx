@@ -32,8 +32,8 @@ export function InfiniteCanvas() {
   const updateCursor = useCollaborationStore((s) => s.updateCursor);
   const userId = useCollaborationStore((s) => s.userId);
 
-  // Drawing interaction hook
-  const { handleMouseDown, handleMouseMove: handleDrawingMouseMove, handleMouseUp } = useCanvasDrawing();
+  // Drawing interaction hook — registers Fabric-level listeners internally
+  useCanvasDrawing(isReady);
 
   // Keyboard shortcuts
   useKeyboardShortcuts();
@@ -96,6 +96,18 @@ export function InfiniteCanvas() {
     } else {
       canvasManager.disableFreeDrawing();
     }
+
+    // Only disable selection/interactivity in pencil and eraser modes
+    const isPencilOrEraser = activeTool === 'pencil' || activeTool === 'eraser';
+    const isShapeTool = activeTool !== 'select' && !isPencilOrEraser;
+
+    canvasManager.canvas.selection = !isShapeTool && !isPencilOrEraser;
+    canvasManager.canvas.getObjects().forEach((obj) => {
+      if ((obj as any).__isGrid || (obj as any).__isPreview) return;
+      obj.selectable = !isPencilOrEraser;
+      obj.evented = !isPencilOrEraser;
+    });
+    canvasManager.canvas.requestRenderAll();
   }, [activeTool, stroke]);
 
   // ============================================================
@@ -123,13 +135,11 @@ export function InfiniteCanvas() {
   // Cursor tracking for collaboration
   // ============================================================
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    // Live shape preview while drawing
-    handleDrawingMouseMove(e);
     // Collaboration cursor tracking
     if (userId) {
       updateCursor(userId, e.clientX, e.clientY);
     }
-  }, [userId, updateCursor, handleDrawingMouseMove]);
+  }, [userId, updateCursor]);
 
   // ============================================================
   // Dynamic cursor style based on active tool
@@ -149,8 +159,6 @@ export function InfiniteCanvas() {
       ref={wrapperRef}
       className="fixed inset-0 overflow-hidden bg-neutral-50 dark:bg-neutral-950"
       style={{ cursor: getCursorStyle() }}
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
       onMouseMove={handleMouseMove}
     >
       {/* Canvas background pattern */}
