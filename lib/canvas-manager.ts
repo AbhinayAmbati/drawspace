@@ -103,6 +103,120 @@ function renderCircleControl(
 }
 
 // ============================================================
+// Arrow Connection and Bending Helpers
+// ============================================================
+
+function getConnectionPoints(obj: fabric.FabricObject) {
+  const left = obj.left ?? 0;
+  const top = obj.top ?? 0;
+  const width = obj.width ? obj.width * (obj.scaleX ?? 1) : 0;
+  const height = obj.height ? obj.height * (obj.scaleY ?? 1) : 0;
+  const center = new fabric.Point(left + width / 2, top + height / 2);
+  const angleRad = ((obj.angle ?? 0) * Math.PI) / 180;
+  
+  const points = [
+    new fabric.Point(left + width / 2, top), // top
+    new fabric.Point(left + width / 2, top + height), // bottom
+    new fabric.Point(left, top + height / 2), // left
+    new fabric.Point(left + width, top + height / 2) // right
+  ];
+
+  return points.map((p, idx) => {
+    if (obj.angle) {
+      const cx = center.x;
+      const cy = center.y;
+      const sin = Math.sin(angleRad);
+      const cos = Math.cos(angleRad);
+      const rx = (p.x - cx) * cos - (p.y - cy) * sin + cx;
+      const ry = (p.x - cx) * sin + (p.y - cy) * cos + cy;
+      return { x: rx, y: ry, name: ['top', 'bottom', 'left', 'right'][idx] };
+    }
+    return { x: p.x, y: p.y, name: ['top', 'bottom', 'left', 'right'][idx] };
+  });
+}
+
+function snapArrowPoint(pointer: Point, arrow: fabric.Path, isStart: boolean) {
+  const canvas = arrow.canvas;
+  if (!canvas) return pointer;
+  
+  const SNAP_DIST = 25;
+  let bestPoint = pointer;
+  let snappedObjId = '';
+  
+  const objects = canvas.getObjects();
+  for (const obj of objects) {
+    if (obj === arrow || (obj as any).__isGrid || (obj as any).__isPreview) continue;
+    if ((obj as any).__isArrow) continue;
+    
+    const connPoints = getConnectionPoints(obj);
+    for (const cp of connPoints) {
+      const dist = Math.hypot(pointer.x - cp.x, pointer.y - cp.y);
+      if (dist < SNAP_DIST) {
+        bestPoint = { x: cp.x, y: cp.y };
+        snappedObjId = (obj as any).__objectId || '';
+        break;
+      }
+    }
+    if (snappedObjId) break;
+  }
+  
+  if (isStart) {
+    (arrow as any).__connectedStartId = snappedObjId;
+    if (snappedObjId) {
+      const snappedObj = objects.find(o => (o as any).__objectId === snappedObjId);
+      if (snappedObj) {
+        const cp = getConnectionPoints(snappedObj);
+        const portIdx = cp.findIndex(p => p.x === bestPoint.x && p.y === bestPoint.y);
+        (arrow as any).__startPortIdx = portIdx;
+      }
+    } else {
+      (arrow as any).__startPortIdx = -1;
+    }
+  } else {
+    (arrow as any).__connectedEndId = snappedObjId;
+    if (snappedObjId) {
+      const snappedObj = objects.find(o => (o as any).__objectId === snappedObjId);
+      if (snappedObj) {
+        const cp = getConnectionPoints(snappedObj);
+        const portIdx = cp.findIndex(p => p.x === bestPoint.x && p.y === bestPoint.y);
+        (arrow as any).__endPortIdx = portIdx;
+      }
+    } else {
+      (arrow as any).__endPortIdx = -1;
+    }
+  }
+  
+  return bestPoint;
+}
+
+function updateArrowPath(target: fabric.Path) {
+  const p0 = (target as any).__p0;
+  const p1 = (target as any).__p1;
+  const p2 = (target as any).__p2;
+  if (!p0 || !p1 || !p2) return;
+  
+  const pathData = `M ${p0.x} ${p0.y} Q ${p1.x} ${p1.y} ${p2.x} ${p2.y}`;
+  (target as any)._setPath(pathData, true);
+  
+  // Ensure non-zero width/height so Fabric cache canvas works correctly
+  const minSize = Math.max(target.strokeWidth || 2, 4);
+  const width = Math.max(target.width || 0, minSize);
+  const height = Math.max(target.height || 0, minSize);
+  target.set({
+    width,
+    height,
+    originX: 'center',
+    originY: 'center',
+  });
+  
+  target.dirty = true;
+  target.setCoords();
+  if (target.canvas) {
+    target.canvas.requestRenderAll();
+  }
+}
+
+// ============================================================
 // Canvas Manager
 // ============================================================
 
@@ -135,6 +249,153 @@ export class CanvasManager {
   /** Stamp modern selection styling onto a single Fabric object. */
   private _applySelectionStyle(obj: fabric.FabricObject) {
     obj.set(CanvasManager.SELECTION_STYLE as any);
+
+    if ((obj as any).__isArrow) {
+      // 1. Assign custom _render to draw the arrowhead at the end point of the path
+      const originalRender = obj._render;
+      obj._render = function(this: any, ctx: CanvasRenderingContext2D) {
+        originalRender.call(this, ctx);
+        
+        const path = this.path;
+        if (!path || path.length < 2) return;
+        const l = -this.pathOffset.x;
+        const t = -this.pathOffset.y;
+        const localP1 = { x: path[1][1] + l, y: path[1][2] + t };
+        const localP2 = { x: path[1][3] + l, y: path[1][4] + t };
+        
+        const angle = Math.atan2(localP2.y - localP1.y, localP2.x - localP1.x);
+        const headLen = 15;
+        const headAngle = Math.PI / 6;
+        
+        ctx.beginPath();
+        ctx.moveTo(localP2.x, localP2.y);
+        ctx.lineTo(
+          localP2.x - headLen * Math.cos(angle - headAngle),
+          localP2.y - headLen * Math.sin(angle - headAngle)
+        );
+        ctx.lineTo(
+          localP2.x - headLen * Math.cos(angle + headAngle),
+          localP2.y - headLen * Math.sin(angle + headAngle)
+        );
+        ctx.closePath();
+        ctx.fillStyle = this.stroke as string;
+        ctx.fill();
+      };
+
+      // 2. Define custom arrow controls (start, mid, end)
+      obj.controls = {
+        start: new fabric.Control({
+          x: -0.5,
+          y: -0.5,
+          positionHandler: (dim: any, finalMatrix: any, fabricObject: fabric.FabricObject) => {
+            const pathObj = fabricObject as fabric.Path;
+            if (!pathObj.path || pathObj.path.length === 0) return new fabric.Point(0, 0);
+            const p = new fabric.Point(
+              (pathObj.path[0][1] as number) - pathObj.pathOffset.x,
+              (pathObj.path[0][2] as number) - pathObj.pathOffset.y
+            );
+            return fabric.util.transformPoint(p, finalMatrix);
+          },
+          actionHandler: (eventData: any, transform: any, x: number, y: number) => {
+            const target = transform.target as fabric.Path;
+            const canvas = target.canvas;
+            if (!canvas) return false;
+            
+            const pointer = (canvas as any).getScenePoint 
+              ? (canvas as any).getScenePoint(eventData) 
+              : (canvas as any).getPointer(eventData);
+            const snappedPointer = snapArrowPoint(pointer, target, true);
+            (target as any).__p0 = snappedPointer;
+            
+            updateArrowPath(target);
+            return true;
+          },
+          actionName: 'modifyStart',
+          cursorStyle: 'pointer',
+          render: renderCircleControl,
+        }),
+        mid: new fabric.Control({
+          x: 0,
+          y: 0,
+          positionHandler: (dim: any, finalMatrix: any, fabricObject: fabric.FabricObject) => {
+            const pathObj = fabricObject as fabric.Path;
+            if (!pathObj.path || pathObj.path.length < 2) return new fabric.Point(0, 0);
+            const p = new fabric.Point(
+              (pathObj.path[1][1] as number) - pathObj.pathOffset.x,
+              (pathObj.path[1][2] as number) - pathObj.pathOffset.y
+            );
+            return fabric.util.transformPoint(p, finalMatrix);
+          },
+          actionHandler: (eventData: any, transform: any, x: number, y: number) => {
+            const target = transform.target as fabric.Path;
+            const canvas = target.canvas;
+            if (!canvas) return false;
+            
+            const pointer = (canvas as any).getScenePoint 
+              ? (canvas as any).getScenePoint(eventData) 
+              : (canvas as any).getPointer(eventData);
+            (target as any).__p1 = pointer;
+            
+            updateArrowPath(target);
+            return true;
+          },
+          actionName: 'modifyMid',
+          cursorStyle: 'pointer',
+          render: (ctx, left, top, styleOverride, fabricObject) => {
+            const size = fabricObject.cornerSize ?? 10;
+            const strokeColor = '#818cf8';
+            const fillColor = '#818cf8'; // Solid filled circle in the middle
+            
+            ctx.save();
+            ctx.translate(left, top);
+            ctx.rotate((fabricObject.angle ?? 0) * Math.PI / 180);
+            
+            ctx.beginPath();
+            ctx.arc(0, 0, size / 2, 0, 2 * Math.PI);
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            
+            ctx.restore();
+          },
+        }),
+        end: new fabric.Control({
+          x: 0.5,
+          y: 0.5,
+          positionHandler: (dim: any, finalMatrix: any, fabricObject: fabric.FabricObject) => {
+            const pathObj = fabricObject as fabric.Path;
+            if (!pathObj.path || pathObj.path.length < 2) return new fabric.Point(0, 0);
+            const p = new fabric.Point(
+              (pathObj.path[1][3] as number) - pathObj.pathOffset.x,
+              (pathObj.path[1][4] as number) - pathObj.pathOffset.y
+            );
+            return fabric.util.transformPoint(p, finalMatrix);
+          },
+          actionHandler: (eventData: any, transform: any, x: number, y: number) => {
+            const target = transform.target as fabric.Path;
+            const canvas = target.canvas;
+            if (!canvas) return false;
+            
+            const pointer = (canvas as any).getScenePoint 
+              ? (canvas as any).getScenePoint(eventData) 
+              : (canvas as any).getPointer(eventData);
+            const snappedPointer = snapArrowPoint(pointer, target, false);
+            (target as any).__p2 = snappedPointer;
+            
+            updateArrowPath(target);
+            return true;
+          },
+          actionName: 'modifyEnd',
+          cursorStyle: 'pointer',
+          render: renderCircleControl,
+        }),
+      };
+      
+      obj.setCoords();
+      return;
+    }
 
     // Apply custom control handles to match reference design exactly
     if (obj.controls) {
@@ -400,42 +661,32 @@ export class CanvasManager {
     if (!this.canvas) return '';
     const id = uuidv4();
 
-    const line = new fabric.Line([x1, y1, x2, y2], {
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+
+    const pathData = `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
+    const arrowPath = new fabric.Path(pathData, {
       stroke: stroke.color,
       strokeWidth: stroke.width,
       strokeDashArray: stroke.dashArray,
-    });
+      fill: 'transparent',
+    }) as any;
 
-    // Arrowhead
-    const angle = Math.atan2(y2 - y1, x2 - x1);
-    const headLen = 15;
-    const headAngle = Math.PI / 6;
+    arrowPath.__objectId = id;
+    arrowPath.__isArrow = true;
+    arrowPath.__p0 = { x: x1, y: y1 };
+    arrowPath.__p1 = { x: cx, y: cy };
+    arrowPath.__p2 = { x: x2, y: y2 };
+    arrowPath.__connectedStartId = '';
+    arrowPath.__connectedEndId = '';
+    arrowPath.__startPortIdx = -1;
+    arrowPath.__endPortIdx = -1;
 
-    const arrowHead = new fabric.Polygon([
-      { x: x2, y: y2 },
-      {
-        x: x2 - headLen * Math.cos(angle - headAngle),
-        y: y2 - headLen * Math.sin(angle - headAngle),
-      },
-      {
-        x: x2 - headLen * Math.cos(angle + headAngle),
-        y: y2 - headLen * Math.sin(angle + headAngle),
-      },
-    ], {
-      fill: stroke.color,
-      stroke: stroke.color,
-      strokeWidth: 1,
-    });
-
-    const group = new fabric.Group([line, arrowHead], {
-      left: Math.min(x1, x2),
-      top: Math.min(y1, y2),
-    });
-    (group as any).__objectId = id;
-    this._applySelectionStyle(group);
-    this.canvas.add(group);
+    updateArrowPath(arrowPath);
+    this._applySelectionStyle(arrowPath);
+    this.canvas.add(arrowPath);
     this.canvas.requestRenderAll();
-    this._emitObjectAdded(group, id);
+    this._emitObjectAdded(arrowPath, id);
     return id;
   }
 
@@ -643,7 +894,17 @@ export class CanvasManager {
 
   exportToJSON(): string {
     if (!this.canvas) return '{}';
-    return JSON.stringify(this.canvas.toObject(['__objectId']));
+    return JSON.stringify(this.canvas.toObject([
+      '__objectId',
+      '__isArrow',
+      '__p0',
+      '__p1',
+      '__p2',
+      '__connectedStartId',
+      '__connectedEndId',
+      '__startPortIdx',
+      '__endPortIdx',
+    ]));
   }
 
   loadFromJSON(json: string): Promise<void> {
@@ -749,6 +1010,49 @@ export class CanvasManager {
       this.onSelectionChanged?.([]);
     });
 
+    // Real-time connector arrow following when elements are moved/scaled/rotated
+    const updateConnectedArrows = (e: any) => {
+      const movedObj = e.target;
+      if (!movedObj || !(movedObj as any).__objectId) return;
+      
+      const movedId = (movedObj as any).__objectId;
+      const objects = this.canvas!.getObjects();
+      
+      objects.forEach((obj) => {
+        if ((obj as any).__isArrow) {
+          const arrow = obj as fabric.Path;
+          let changed = false;
+          
+          if ((arrow as any).__connectedStartId === movedId) {
+            const portIdx = (arrow as any).__startPortIdx ?? 0;
+            const cp = getConnectionPoints(movedObj);
+            if (cp[portIdx]) {
+              (arrow as any).__p0 = { x: cp[portIdx].x, y: cp[portIdx].y };
+              changed = true;
+            }
+          }
+          
+          if ((arrow as any).__connectedEndId === movedId) {
+            const portIdx = (arrow as any).__endPortIdx ?? 0;
+            const cp = getConnectionPoints(movedObj);
+            if (cp[portIdx]) {
+              (arrow as any).__p2 = { x: cp[portIdx].x, y: cp[portIdx].y };
+              changed = true;
+            }
+          }
+          
+          if (changed) {
+            updateArrowPath(arrow);
+            this._emitObjectModified(arrow, (arrow as any).__objectId);
+          }
+        }
+      });
+    };
+
+    this.canvas.on('object:moving', updateConnectedArrows);
+    this.canvas.on('object:scaling', updateConnectedArrows);
+    this.canvas.on('object:rotating', updateConnectedArrows);
+
     // Object modified
     this.canvas.on('object:modified', (e) => {
       const obj = e.target;
@@ -827,7 +1131,10 @@ export class CanvasManager {
     if (obj instanceof fabric.Ellipse) return 'ellipse';
     if (obj instanceof fabric.Line) return 'line';
     if (obj instanceof fabric.IText || obj instanceof fabric.Textbox) return 'text';
-    if (obj instanceof fabric.Path) return 'pencil';
+    if (obj instanceof fabric.Path) {
+      if ((obj as any).__isArrow) return 'arrow';
+      return 'pencil';
+    }
     if (obj instanceof fabric.Polygon) return 'diamond';
     if (obj instanceof fabric.Group) return 'arrow'; // simplification
     if (obj instanceof fabric.FabricImage) return 'image';

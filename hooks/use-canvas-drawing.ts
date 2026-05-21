@@ -146,27 +146,53 @@ export function useCanvasDrawing(isReady: boolean) {
         );
         break;
       case 'arrow': {
-        const line = new fabric.Line(
-          [start.x, start.y, current.x, current.y],
-          { stroke: previewStroke, strokeWidth: s.width },
-        );
-
-        const angle = Math.atan2(current.y - start.y, current.x - start.x);
-        const headLen = 15;
-        const headAngle = Math.PI / 6;
-        const arrowHead = new fabric.Polygon(
-          [
-            { x: current.x, y: current.y },
-            { x: current.x - headLen * Math.cos(angle - headAngle), y: current.y - headLen * Math.sin(angle - headAngle) },
-            { x: current.x - headLen * Math.cos(angle + headAngle), y: current.y - headLen * Math.sin(angle + headAngle) },
-          ],
-          { fill: previewStroke, stroke: previewStroke, strokeWidth: 1 },
-        );
-        obj = new fabric.Group([line, arrowHead], {
-          left: Math.min(start.x, current.x),
-          top: Math.min(start.y, current.y),
+        const cx = (start.x + current.x) / 2;
+        const cy = (start.y + current.y) / 2;
+        const pathData = `M ${start.x} ${start.y} Q ${cx} ${cy} ${current.x} ${current.y}`;
+        
+        const arrowPath = new fabric.Path(pathData, {
+          stroke: previewStroke,
+          strokeWidth: s.width,
+          fill: 'transparent',
           ...common,
-        });
+        }) as any;
+        
+        arrowPath.__isArrow = true;
+        arrowPath.__p0 = { x: start.x, y: start.y };
+        arrowPath.__p1 = { x: cx, y: cy };
+        arrowPath.__p2 = { x: current.x, y: current.y };
+        
+        // Custom _render to draw arrowhead in drawing preview
+        const originalRender = arrowPath._render;
+        arrowPath._render = function(this: any, ctx: CanvasRenderingContext2D) {
+          originalRender.call(this, ctx);
+          
+          if (!this.path || this.path.length < 2) return;
+          const l = -this.pathOffset.x;
+          const t = -this.pathOffset.y;
+          const localP1 = { x: this.path[1][1] + l, y: this.path[1][2] + t };
+          const localP2 = { x: this.path[1][3] + l, y: this.path[1][4] + t };
+          
+          const angle = Math.atan2(localP2.y - localP1.y, localP2.x - localP1.x);
+          const headLen = 15;
+          const headAngle = Math.PI / 6;
+          
+          ctx.beginPath();
+          ctx.moveTo(localP2.x, localP2.y);
+          ctx.lineTo(
+            localP2.x - headLen * Math.cos(angle - headAngle),
+            localP2.y - headLen * Math.sin(angle - headAngle)
+          );
+          ctx.lineTo(
+            localP2.x - headLen * Math.cos(angle + headAngle),
+            localP2.y - headLen * Math.sin(angle + headAngle)
+          );
+          ctx.closePath();
+          ctx.fillStyle = this.stroke;
+          ctx.fill();
+        };
+
+        obj = arrowPath;
         break;
       }
     }
